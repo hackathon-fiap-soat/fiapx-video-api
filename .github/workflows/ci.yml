@@ -1,0 +1,91 @@
+name: ci
+
+# Checks de todo PR (spec §11.2): pint, phpstan, phpunit (cobertura ≥ 80%, com MySQL e LocalStack do
+# fiapx-infra/local), behat (SAGA), build da imagem + Trivy, kustomize + kubeconform e terraform validate.
+# O deploy (deploy.yml reutilizável, ADR-018), o OIDC e o SonarCloud entram na Etapa 8.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: fiapx-video-api
+    steps:
+      # Repositórios lado a lado, como na máquina de quem desenvolve (o compose monta ../fiapx-docs).
+      - uses: actions/checkout@v4
+        with: { path: fiapx-video-api }
+      - uses: actions/checkout@v4
+        with: { repository: hackathon-fiap-soat/fiapx-docs, path: fiapx-docs }
+      - uses: actions/checkout@v4
+        with: { repository: hackathon-fiap-soat/fiapx-infra, path: fiapx-infra }
+      - name: Ambiente local (MySQL + LocalStack + Mailpit)
+        working-directory: fiapx-infra/local
+        run: docker compose up -d --wait
+      - name: Imagem de desenvolvimento e dependências
+        run: |
+          cp .env.example .env
+          docker compose build -q app
+          docker compose run --rm -q app composer install --no-interaction --no-progress
+          docker compose run --rm -q app php artisan key:generate
+          docker compose run --rm -q app php artisan migrate --force
+      - name: Pint e PHPStan
+        run: docker compose run --rm -q app composer lint
+      - name: PHPUnit (unit, feature, contrato e integração) com cobertura ≥ 80%
+        run: docker compose run --rm -q app composer test:coverage
+      - name: Behat (cenários obrigatórios da SAGA)
+        run: docker compose run --rm -q app composer bdd
+      - name: Logs do ambiente em caso de falha
+        if: failure()
+        working-directory: fiapx-infra/local
+        run: docker compose logs --no-color
+
+  imagem:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build da imagem de produção (linux/amd64)
+        run: docker build --platform linux/amd64 -t fiapx-video-api:${{ github.sha }} .
+      - name: Trivy (falha em CRITICAL)
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: fiapx-video-api:${{ github.sha }}
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: kustomize build + kubeconform
+        run: |
+          cp k8s/overlays/prod/aws.env.example k8s/overlays/prod/aws.env
+          docker run --rm -v "$PWD/k8s":/k8s registry.k8s.io/kustomize/kustomize:v5.6.0 build /k8s/overlays/prod > manifests.yaml
+          docker run --rm -v "$PWD":/w ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary -ignore-missing-schemas -kubernetes-version 1.33.0 /w/manifests.yaml
+
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.15.8 }
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate

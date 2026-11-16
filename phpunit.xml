@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Suítes: Unit (domínio e casos de uso com Mockery, sem I/O), Feature (HTTP com MySQL), Contract (mensagens,
+  OpenAPI e JWT contra o fiapx-docs) e Integration (S3, SQS e o fluxo da saga no LocalStack).
+  Feature, Contract e Integration rodam dentro do compose (MySQL e LocalStack do fiapx-infra/local).
+-->
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="vendor/autoload.php"
+         colors="true"
+         failOnRisky="true"
+         failOnWarning="true"
+         displayDetailsOnTestsThatTriggerNotices="true"
+>
+    <testsuites>
+        <testsuite name="Unit">
+            <directory>tests/Unit</directory>
+        </testsuite>
+        <testsuite name="Feature">
+            <directory>tests/Feature</directory>
+        </testsuite>
+        <testsuite name="Contract">
+            <directory>tests/Contract</directory>
+        </testsuite>
+        <testsuite name="Integration">
+            <directory>tests/Integration</directory>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include>
+            <directory>app</directory>
+        </include>
+    </source>
+    <coverage>
+        <report>
+            <text outputFile="php://stdout" showOnlySummary="true"/>
+            <clover outputFile="coverage/clover.xml"/>
+        </report>
+    </coverage>
+    <php>
+        <!-- <server> também: no Docker, o env_file chega em $_SERVER, que o Laravel lê primeiro. -->
+        <env name="APP_ENV" value="testing" force="true"/>
+        <server name="APP_ENV" value="testing" force="true"/>
+        <env name="APP_KEY" value="base64:dGVzdGVzdGVzdGVzdGVzdGVzdGVzdGVzdGVzdGVzdA==" force="true"/>
+        <server name="APP_KEY" value="base64:dGVzdGVzdGVzdGVzdGVzdGVzdGVzdGVzdGVzdGVzdA==" force="true"/>
+        <env name="APP_MAINTENANCE_DRIVER" value="file" force="true"/>
+        <server name="APP_MAINTENANCE_DRIVER" value="file" force="true"/>
+        <env name="CACHE_STORE" value="array" force="true"/>
+        <server name="CACHE_STORE" value="array" force="true"/>
+        <env name="SESSION_DRIVER" value="array" force="true"/>
+        <server name="SESSION_DRIVER" value="array" force="true"/>
+        <env name="QUEUE_CONNECTION" value="sync" force="true"/>
+        <server name="QUEUE_CONNECTION" value="sync" force="true"/>
+        <env name="LOG_CHANNEL" value="null" force="true"/>
+        <server name="LOG_CHANNEL" value="null" force="true"/>
+        <env name="DB_CONNECTION" value="mysql" force="true"/>
+        <server name="DB_CONNECTION" value="mysql" force="true"/>
+        <!-- Dentro do Docker o navegador "é" o próprio container: as URLs pré-assinadas usam o host interno. -->
+        <env name="AWS_S3_PUBLIC_ENDPOINT" value="http://localstack:4566" force="true"/>
+        <server name="AWS_S3_PUBLIC_ENDPOINT" value="http://localstack:4566" force="true"/>
+        <env name="FIAPX_CONSUMER_WAIT_SECONDS" value="1" force="true"/>
+        <server name="FIAPX_CONSUMER_WAIT_SECONDS" value="1" force="true"/>
+        <env name="FIAPX_RELAY_IDLE_MS" value="10" force="true"/>
+        <server name="FIAPX_RELAY_IDLE_MS" value="10" force="true"/>
+    </php>
+</phpunit>

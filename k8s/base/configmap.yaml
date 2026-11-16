@@ -1,0 +1,41 @@
+# Configuração não sensível. Os valores da AWS (bucket, filas, chave pública do JWT...) vêm do overlay, que
+# os gera a partir do SSM no deploy. O segredo do banco fica no Secret fiapx-video-api-db (gerado no CI a
+# partir do Secrets Manager).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fiapx-video-api-base
+data:
+  APP_NAME: fiapx-video-api
+  APP_ENV: production
+  APP_DEBUG: "false"
+  LOG_CHANNEL: json
+  LOG_LEVEL: info
+  CACHE_STORE: array
+  SESSION_DRIVER: array
+  QUEUE_CONNECTION: sync
+  DB_CONNECTION: mysql
+  NEW_RELIC_APP_NAME: fiapx-video-api
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fiapx-video-api-nginx
+data:
+  default.conf.template: |
+    server {
+        listen 8080;
+        root /var/www/html/public;
+        index index.php;
+        client_max_body_size 1m;
+        server_tokens off;
+        location / {
+            try_files $uri /index.php?$query_string;
+        }
+        location ~ \.php$ {
+            fastcgi_pass 127.0.0.1:9000;
+            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+            include fastcgi_params;
+            fastcgi_read_timeout 30s;
+        }
+    }

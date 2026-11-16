@@ -22,7 +22,7 @@ Repositórios na organização [hackathon-fiap-soat](https://github.com/hackatho
 | [`fiapx-docs`](https://github.com/hackathon-fiap-soat/fiapx-docs) | Documentação: arquitetura, ADRs, RFCs, contratos, OpenAPI, diagramas e entrega | Markdown + Mermaid + JSON Schema | Etapa 1 ✅ |
 | [`fiapx-infra`](https://github.com/hackathon-fiap-soat/fiapx-infra) | VPC, EKS, Aurora, S3, SQS, SES, ECR, API Gateway, OIDC, SSM, orquestrador de deploy e ambiente local | Terraform + Helm + docker-compose | Etapa 2 ✅ (local), Etapas 7–8 |
 | [`fiapx-auth`](https://github.com/hackathon-fiap-soat/fiapx-auth) | Lambdas de cadastro, login, senha e authorizer JWT | Node.js 24 + Terraform | Etapa 3 ✅ |
-| **fiapx-video-api** | API de vídeos, URLs pré-assinadas, orquestrador da SAGA e outbox | PHP 8.4.27 + Laravel 13 no EKS | Etapa 4 |
+| **fiapx-video-api** | API de vídeos, URLs pré-assinadas, orquestrador da SAGA e outbox | PHP 8.4.27 + Laravel 13 no EKS | Etapa 4 ✅ |
 | [`fiapx-video-processor`](https://github.com/hackathon-fiap-soat/fiapx-video-processor) | Worker que extrai os frames com ffmpeg e gera o zip | PHP 8.4.27 + Laravel 13 no EKS + KEDA | Etapa 5 |
 | [`fiapx-notification`](https://github.com/hackathon-fiap-soat/fiapx-notification) | E-mails pelo SES com histórico e idempotência no DynamoDB | Node.js 24 + Terraform | Etapa 6 |
 | [`fiapx-web`](https://github.com/hackathon-fiap-soat/fiapx-web) | Front-end: cadastro, login, senha, upload, status e download | React + Vite + TypeScript + Tailwind | Etapa 6.5 |
@@ -43,8 +43,8 @@ Decisão nova ou que contrarie uma existente vira ADR no `fiapx-docs`.
 
 ## Andamento (2026-11-16)
 
-Etapas 0 (repositórios), 1 (documentação), 2 (ambiente local) e 3 (`fiapx-auth`) concluídas. Próxima:
-Etapa 4 (`fiapx-video-api`).
+Etapas 0 a 4 concluídas (repositórios, documentação, ambiente local, `fiapx-auth` e `fiapx-video-api`).
+Próxima: Etapa 5 (`fiapx-video-processor`).
 Ordem do plano: 3 auth → 4 video-api → 5 processor → 6 notification → 6.5 web → 7 infra AWS 🛑 → 8 CI/CD →
 9 observabilidade → 10 carga e entregáveis 🛑. O estado atualizado está no painel.
 
@@ -77,7 +77,7 @@ Para um serviço usar o LocalStack: `AWS_ENDPOINT_URL=http://localhost:4566`, `A
 `AWS_SECRET_ACCESS_KEY=test`, `AWS_REGION=us-east-1`. Os nomes dos recursos vêm do SSM em `/fiapx/local/...`
 (mesmas chaves de produção, com `<env>` = `local`).
 
-## Este repositório (Etapa 4)
+## Este repositório (Etapa 4 ✅)
 
 Aplicação principal em Laravel 13, com DDD + Clean Architecture (padrão do `tech-challenge-application`,
 spec §8.4 e ADR-003):
@@ -103,7 +103,22 @@ spec §8.4 e ADR-003):
 - O `saga:consume` descarta o `s3:TestEvent` sem erro.
 
 **DoD da Etapa 4:** cobertura ≥ 80%; cenários BDD (Behat) da SAGA passam; fluxo local funciona com o
-processor simulado.
+processor simulado. Cumprido: 111 testes (92% de linhas), 7 cenários Behat, fluxo ponta a ponta no compose.
+
+Como trabalhar aqui (detalhes no `README.md`):
+
+- O PHP roda no container (`docker compose run --rm app ...`); o compose entra na rede `fiapx_default` do
+  `fiapx-infra/local` e monta `../fiapx-docs` em `/fiapx-docs` para os testes de contrato.
+- `composer lint` (pint + phpstan nível 6), `composer test`, `composer test:coverage` (mínimo 80%) e
+  `composer bdd` (Behat em `features/`, contexto em `tests/Behat`).
+- `processor:simulate` (só `APP_ENV=local`) faz o papel do `fiapx-video-processor` até a Etapa 5; arquivo com
+  menos de 8 bytes simula vídeo corrompido.
+- Decisões desta etapa (registradas no `fiapx-docs`): `correlation_id` = `MessageId` da mensagem SQS do evento
+  do S3; MIME aceito `video/*` ou `application/octet-stream`; `FIAPX_NOTIFY_ON_COMPLETED` (padrão `true`);
+  imagem de produção `linux/amd64` (agente New Relic); `infra/` cria as rotas `/api/videos*` e a role do Pod
+  Identity.
+- Pendências para a Etapa 8: `deploy.yml` reutilizável (ADR-018), geração de `k8s/overlays/prod/aws.env` a partir
+  do SSM e do Secret `fiapx-video-api-db` a partir do Secrets Manager, SonarCloud.
 
 ## Skills deste repositório
 

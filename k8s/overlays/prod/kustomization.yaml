@@ -1,0 +1,33 @@
+# Produção. O deploy (Etapa 8, ADR-018) gera aws.env a partir do SSM, cria o Secret do banco a partir do
+# Secrets Manager e roda `kustomize edit set image fiapx-video-api=<ecr>:<sha>` antes do `kubectl apply -k`.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  - name: fiapx-video-api
+    newName: fiapx-video-api
+    newTag: latest
+configMapGenerator:
+  - name: fiapx-video-api-aws
+    namespace: fiapx
+    envs: [aws.env]
+generatorOptions:
+  disableNameSuffixHash: false
+replacements:
+  - source: { kind: ConfigMap, name: fiapx-video-api-aws, fieldPath: data.TARGET_GROUP_ARN }
+    targets:
+      - select: { kind: TargetGroupBinding, name: video-api-web }
+        fieldPaths: [spec.targetGroupARN]
+  - source: { kind: ConfigMap, name: fiapx-video-api-aws, fieldPath: data.SQS_VIDEO_UPLOADED_URL }
+    targets:
+      - select: { kind: ScaledObject, name: video-api-saga-consumer }
+        fieldPaths: [spec.triggers.0.metadata.queueURL]
+  - source: { kind: ConfigMap, name: fiapx-video-api-aws, fieldPath: data.SQS_SAGA_REPLIES_URL }
+    targets:
+      - select: { kind: ScaledObject, name: video-api-saga-consumer }
+        fieldPaths: [spec.triggers.1.metadata.queueURL]
+  - source: { kind: ConfigMap, name: fiapx-video-api-aws, fieldPath: data.AWS_REGION }
+    targets:
+      - select: { kind: ScaledObject, name: video-api-saga-consumer }
+        fieldPaths: [spec.triggers.0.metadata.awsRegion, spec.triggers.1.metadata.awsRegion]

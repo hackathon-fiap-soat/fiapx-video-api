@@ -1,0 +1,23 @@
+# Job pré-deploy: o pipeline apaga o anterior, aplica este e espera terminar antes de atualizar os Deployments.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: video-api-migrate
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      serviceAccountName: fiapx-video-api
+      restartPolicy: Never
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: migrate
+          image: fiapx-video-api
+          command: ["php", "artisan", "migrate", "--force"]
+          envFrom:
+            - configMapRef: { name: fiapx-video-api-base }
+            - configMapRef: { name: fiapx-video-api-aws }
+            - secretRef: { name: fiapx-video-api-db }
+            - secretRef: { name: fiapx-video-api-app, optional: true }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }

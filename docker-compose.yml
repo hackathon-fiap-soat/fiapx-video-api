@@ -1,0 +1,63 @@
+# fiapx-video-api no ambiente local. Pré-requisito: o ambiente do fiapx-infra de pé
+# (cd ../fiapx-infra/local && docker compose up -d --wait), porque este compose entra na rede dele.
+#
+#   docker compose run --rm app composer install          dependências
+#   docker compose run --rm app php artisan migrate       tabelas do fiapx_video
+#   docker compose up -d                                  API em http://localhost:8080 + consumidor + relay + agendador
+#   docker compose --profile simulador up -d              + processor simulado (até a Etapa 5)
+name: fiapx-video-api
+
+x-app: &app
+  build: { context: ., target: dev }
+  image: fiapx-video-api:dev
+  env_file: .env
+  volumes:
+    - .:/var/www/html
+    # Contratos (schemas, OpenAPI e vetores do JWT) para os testes de contrato.
+    - ../fiapx-docs:/fiapx-docs:ro
+  environment:
+    FIAPX_DOCS_DIR: /fiapx-docs
+  networks: [fiapx]
+
+services:
+  app:
+    <<: *app
+    command: php-fpm
+
+  web:
+    image: nginx:1.29-alpine
+    depends_on: [app]
+    environment:
+      PHP_FPM_HOST: app
+    volumes:
+      - ./public:/var/www/html/public:ro
+      - ./docker/nginx/default.conf:/etc/nginx/templates/default.conf.template:ro
+    ports:
+      - "${API_PORT:-8080}:8080"
+    networks: [fiapx]
+
+  saga-consumer:
+    <<: *app
+    command: php artisan saga:consume
+    restart: unless-stopped
+
+  outbox-relay:
+    <<: *app
+    command: php artisan outbox:relay
+    restart: unless-stopped
+
+  scheduler:
+    <<: *app
+    command: php artisan schedule:work
+    restart: unless-stopped
+
+  processor-simulado:
+    <<: *app
+    command: php artisan processor:simulate
+    restart: unless-stopped
+    profiles: [simulador]
+
+networks:
+  fiapx:
+    name: fiapx_default
+    external: true

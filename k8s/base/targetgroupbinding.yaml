@@ -1,0 +1,10 @@
+# Registra os IPs dos pods do video-api-web no Target Group do ALB interno (ADR-010). O ARN vem do SSM
+# (/fiapx/<env>/alb/target_group_arn) pelo overlay.
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: video-api-web
+spec:
+  serviceRef: { name: video-api-web, port: 80 }
+  targetGroupARN: TARGET_GROUP_ARN
+  targetType: ip
