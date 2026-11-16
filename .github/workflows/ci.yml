@@ -60,7 +60,7 @@ jobs:
       - name: Build da imagem de produção (linux/amd64)
         run: docker build --platform linux/amd64 -t fiapx-video-api:${{ github.sha }} .
       - name: Trivy (falha em CRITICAL)
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: fiapx-video-api:${{ github.sha }}
           severity: CRITICAL
