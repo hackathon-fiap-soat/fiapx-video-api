@@ -15,11 +15,11 @@ Terraform (rotas no API Gateway e role do Pod Identity)
 
 ## Arquitetura
 
-DDD + Clean Architecture ([ADR-003](https://github.com/hackathon-fiap-soat/fiapx-docs/blob/main/04-adrs/ADR-003-ddd-e-clean-architecture-nos-servicos-laravel.md)),
+Aplicação Laravel 13. Dentro dela, o código segue DDD + Clean Architecture ([ADR-003](https://github.com/hackathon-fiap-soat/fiapx-docs/blob/main/04-adrs/ADR-003-ddd-e-clean-architecture-nos-servicos-laravel.md)),
 com as dependências apontando para dentro:
 
 ```text
-app/Domain/          PHP puro: Video, ProcessingSaga (máquina de estados), ProcessingQuota, VOs e interfaces
+app/Domain/          regras de negócio sem importar o Laravel (ADR-003): Video, ProcessingSaga (máquina de estados), ProcessingQuota, VOs e interfaces
 app/Application/     casos de uso, portas (ObjectStorage, CommandBus, TransactionManager, MessageDeduplicator),
                      DTOs e a MessageFactory (envelope dos contratos v1)
 app/Infrastructure/  Eloquent (lock otimista na saga), outbox + relay, SQS, S3, JWT, SSM, relógio e UUID

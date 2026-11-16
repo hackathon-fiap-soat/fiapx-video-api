@@ -13,8 +13,9 @@ use App\Domain\Video\ValueObjects\FailureReason;
 use App\Domain\Video\ValueObjects\VideoId;
 
 /**
- * Orquestrador da SAGA de processamento de um vídeo (ADR-008). PHP puro: decide o próximo estado e o
- * passo atual; quem executa os efeitos (cota, outbox, S3) são os casos de uso, na mesma transação.
+ * Orquestrador da SAGA de processamento de um vídeo (ADR-008). Classe da camada de domínio, sem dependência
+ * do Laravel (ADR-003): decide o próximo estado e o passo atual; quem executa os efeitos (cota, outbox, S3) são
+ * os casos de uso, na mesma transação, usando o Laravel pela camada de infraestrutura.
  *
  * Sucesso:  STARTED → UPLOAD_VALIDATED → QUOTA_RESERVED → PROCESSING_REQUESTED → PROCESSING → COMPLETED → NOTIFIED
  * Falha:    ... → COMPENSATING → COMPENSATED (vídeo FAILED) → NOTIFIED
