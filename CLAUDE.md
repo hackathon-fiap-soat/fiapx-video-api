@@ -89,6 +89,12 @@ spec §8.4 e ADR-003):
   use case (exceção: o loop dos consumidores).
 - Endpoints: `POST /api/videos` (POST pré-assinado, 500 MB, 1 h), `GET /api/videos`, `GET /api/videos/{id}`,
   `GET /api/videos/{id}/download`, health. Usuário vem dos headers `x-user-*`, revalidando o JWT.
+- **A aplicação roda autenticada e valida o JWT igual ao authorizer do `fiapx-auth`**, seguindo o
+  [contrato do JWT](https://github.com/hackathon-fiap-soat/fiapx-docs/blob/main/contracts/jwt/README.md):
+  só RS256 com a chave pública do SSM (`/fiapx/<env>/auth/jwt_public_key`), `iss = fiapx-auth`,
+  `aud = fiapx-api`, `exp` obrigatório, tolerância de 30 s e claims `sub`, `email` e `name`. Token inválido →
+  401. Um teste PHPUnit roda os vetores de `fiapx-docs/contracts/jwt/vetores.json` (os mesmos do Node).
+  Localmente, um token emitido pelo `npm run dev` do `fiapx-auth` precisa ser aceito aqui.
 - SAGA orquestrada (ADR-008): estado em `processing_sagas`, comandos pela `outbox_messages`, consumidores
   idempotentes (`processed_messages`), `deadline_at` e `PROCESSING_TIMEOUT`, `messaging:prune` diário.
 - Processos: web, `outbox:relay`, `saga:consume` (filas `video-uploaded` e `saga-replies.fifo`), cron e Job
