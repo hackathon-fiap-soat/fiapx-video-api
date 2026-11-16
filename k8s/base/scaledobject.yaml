@@ -1,0 +1,26 @@
+# saga-consumer escalado pelo KEDA de 1 a 5 réplicas, pela profundidade das duas filas que ele consome.
+# O KEDA usa a identidade do próprio workload (Pod Identity, identityOwner: workload) para ler GetQueueAttributes.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: video-api-aws
+spec:
+  podIdentity: { provider: aws, identityOwner: workload }
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: video-api-saga-consumer
+spec:
+  scaleTargetRef: { name: video-api-saga-consumer }
+  minReplicaCount: 1
+  maxReplicaCount: 5
+  pollingInterval: 15
+  cooldownPeriod: 120
+  triggers:
+    - type: aws-sqs-queue
+      authenticationRef: { name: video-api-aws }
+      metadata: { queueURL: VIDEO_UPLOADED_QUEUE_URL, queueLength: "10", awsRegion: AWS_REGION }
+    - type: aws-sqs-queue
+      authenticationRef: { name: video-api-aws }
+      metadata: { queueURL: SAGA_REPLIES_QUEUE_URL, queueLength: "10", awsRegion: AWS_REGION }

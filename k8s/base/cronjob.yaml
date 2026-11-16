@@ -1,0 +1,32 @@
+# schedule:run a cada minuto: saga:check-timeouts, videos:expire-pending e messaging:prune (routes/console.php).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: video-api-scheduler
+spec:
+  schedule: "* * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 55
+      template:
+        spec:
+          serviceAccountName: fiapx-video-api
+          restartPolicy: Never
+          securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+          containers:
+            - name: scheduler
+              image: fiapx-video-api
+              command: ["php", "artisan", "schedule:run"]
+              envFrom:
+                - configMapRef: { name: fiapx-video-api-base }
+                - configMapRef: { name: fiapx-video-api-aws }
+                - secretRef: { name: fiapx-video-api-db }
+                - secretRef: { name: fiapx-video-api-app, optional: true }
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits: { cpu: 500m, memory: 256Mi }
+              securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }

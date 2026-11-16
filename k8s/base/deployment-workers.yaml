@@ -1,0 +1,60 @@
+# outbox-relay (1 a 2 réplicas) e saga-consumer (KEDA, 1 a 5): mesma imagem, comandos diferentes.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: video-api-outbox-relay
+  labels: { app.kubernetes.io/name: video-api-outbox-relay, app.kubernetes.io/part-of: fiapx }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: video-api-outbox-relay }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: video-api-outbox-relay, app.kubernetes.io/part-of: fiapx }
+    spec:
+      serviceAccountName: fiapx-video-api
+      terminationGracePeriodSeconds: 30
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: relay
+          image: fiapx-video-api
+          command: ["php", "artisan", "outbox:relay"]
+          envFrom:
+            - configMapRef: { name: fiapx-video-api-base }
+            - configMapRef: { name: fiapx-video-api-aws }
+            - secretRef: { name: fiapx-video-api-db }
+            - secretRef: { name: fiapx-video-api-app, optional: true }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: video-api-saga-consumer
+  labels: { app.kubernetes.io/name: video-api-saga-consumer, app.kubernetes.io/part-of: fiapx }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: video-api-saga-consumer }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: video-api-saga-consumer, app.kubernetes.io/part-of: fiapx }
+    spec:
+      serviceAccountName: fiapx-video-api
+      terminationGracePeriodSeconds: 60
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: consumer
+          image: fiapx-video-api
+          command: ["php", "artisan", "saga:consume"]
+          envFrom:
+            - configMapRef: { name: fiapx-video-api-base }
+            - configMapRef: { name: fiapx-video-api-aws }
+            - secretRef: { name: fiapx-video-api-db }
+            - secretRef: { name: fiapx-video-api-app, optional: true }
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 256Mi }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
