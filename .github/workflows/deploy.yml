@@ -1,4 +1,4 @@
-name: deploy
+name: Deploy · video-api no EKS (imagem, rotas e migrations)
 
 # Deploy do video-api (ADR-018): no merge na main e chamado pelo deploy-all do fiapx-infra.
 # Imagem no ECR → rotas no API Gateway (Terraform) → manifests no EKS, com a migração antes dos Deployments.
@@ -22,20 +22,24 @@ env:
   SSM: /fiapx/prod
 
 jobs:
+  # Chamado pelo deploy-all, aparece como "4 · Video API (EKS) / Implantar".
   deploy:
+    name: Implantar
     runs-on: ubuntu-latest
     environment: prod
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - name: Baixar o fiapx-video-api
+        uses: actions/checkout@v4
         with: { repository: hackathon-fiap-soat/fiapx-video-api }
-      - id: aws
+      - name: Autenticar na AWS Academy e garantir o bucket do state
+        id: aws
         uses: hackathon-fiap-soat/fiapx-infra/.github/actions/aws-lab@main
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-      - name: Ler o SSM (ambiente no ar e na ordem certa?)
+      - name: Ler parâmetros do SSM e gerar o aws.env (ambiente no ar e na ordem certa?)
         id: p
         run: |
           set -euo pipefail
@@ -60,25 +64,26 @@ jobs:
           ENV
           sed -i 's/^ *//' k8s/overlays/prod/aws.env
 
-      - name: Imagem (linux/amd64) no ECR
+      - name: Construir a imagem (linux/amd64) e enviar ao ECR
         run: |
           set -euo pipefail
           aws ecr get-login-password | docker login --username AWS --password-stdin "${{ steps.p.outputs.ecr }}"
           docker build --platform linux/amd64 -t "${{ steps.p.outputs.ecr }}:${{ github.sha }}" .
           docker push "${{ steps.p.outputs.ecr }}:${{ github.sha }}"
 
-      - uses: hashicorp/setup-terraform@v3
+      - name: Instalar o Terraform
+        uses: hashicorp/setup-terraform@v3
         with: { terraform_version: 1.15.8, terraform_wrapper: false }
-      - name: Terraform apply (rotas /api/videos* e /api/health/*)
+      - name: Aplicar as rotas /api/videos* e /api/health/* no API Gateway (Terraform)
         working-directory: infra
         run: |
           terraform init -input=false -backend-config="bucket=${{ steps.aws.outputs.state-bucket }}"
           terraform apply -auto-approve -input=false -lock-timeout=10m
 
-      - name: Acesso ao cluster
+      - name: Configurar o acesso ao cluster EKS (kubeconfig)
         run: aws eks update-kubeconfig --name "${{ steps.p.outputs.cluster }}"
 
-      - name: Secrets do Kubernetes (banco e app)
+      - name: Criar os Secrets do Kubernetes (banco e app)
         env:
           NR_KEY: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
         run: |
@@ -98,7 +103,8 @@ jobs:
             --from-literal=APP_KEY="$app_key" \
             --from-literal=NEW_RELIC_LICENSE_KEY="${NR_KEY}" | kubectl apply -f -
 
-      - name: Manifests (migração antes dos Deployments)
+      # A migração roda antes dos Deployments: se o Job falhar, os pods antigos continuam no ar.
+      - name: Aplicar os manifests, menos Deployments e CronJob (inclui o Job de migrations)
         run: |
           set -euo pipefail
           sed -i "s|newName: fiapx-video-api|newName: ${{ steps.p.outputs.ecr }}|; s|newTag: latest|newTag: ${{ github.sha }}|" \
@@ -106,17 +112,27 @@ jobs:
           kubectl kustomize k8s/overlays/prod > manifests.yaml
           kubectl -n fiapx delete job video-api-migrate --ignore-not-found --wait
           yq 'select(.kind != "Deployment" and .kind != "CronJob")' manifests.yaml | kubectl apply -f -
+
+      - name: Aguardar o Job de migrations
+        run: |
+          set -euo pipefail
           if ! kubectl -n fiapx wait --for=condition=complete job/video-api-migrate --timeout=5m; then
             kubectl -n fiapx logs job/video-api-migrate --tail=100 || true
             echo "::error::A migração falhou; os Deployments não foram atualizados."
             exit 1
           fi
-          kubectl apply -f manifests.yaml
+
+      - name: Aplicar os Deployments e o CronJob com a imagem nova
+        run: kubectl apply -f manifests.yaml
+
+      - name: Aguardar o rollout dos Deployments (web, outbox-relay e saga-consumer)
+        run: |
+          set -euo pipefail
           for d in video-api-web video-api-outbox-relay video-api-saga-consumer; do
             kubectl -n fiapx rollout status deployment/$d --timeout=5m
           done
 
-      - name: Resumo
+      - name: Escrever o resumo do deploy
         run: |
           api=$(aws ssm get-parameter --name "$SSM/apigw/url" --query Parameter.Value --output text)
           {
