@@ -56,7 +56,8 @@ COPY docker/php/www.conf /usr/local/etc/php-fpm.d/zz-fiapx.conf
 COPY --from=vendor --chown=www-data:www-data /var/www/html /var/www/html
 RUN mkdir -p storage/framework/cache storage/framework/views storage/logs bootstrap/cache \
  && chown -R www-data:www-data storage bootstrap/cache
-USER www-data
+# Numérico: com runAsNonRoot, o Kubernetes só aceita a imagem se puder confirmar que o UID não é 0.
+USER 82:82
 EXPOSE 9000
 # Liveness do php-fpm (o probe HTTP do Kubernetes passa pelo nginx em /api/health/live).
 HEALTHCHECK --interval=30s --timeout=3s CMD php -r 'exit(@fsockopen("127.0.0.1", 9000) ? 0 : 1);'
