@@ -8,9 +8,11 @@ terraform {
     }
   }
 
-  # Configuração parcial: bucket, key e região chegam no `terraform init -backend-config=...` do CI
-  # (o bucket do state é criado pelo fiapx-infra/bootstrap). Lock nativo do S3 (ADR-002).
+  # Configuração parcial: o bucket (fiapx-tfstate-<account_id>) chega no `terraform init -backend-config`
+  # do workflow, que também o cria se faltar (ADR-019). Lock nativo do S3 (ADR-002).
   backend "s3" {
+    key          = "fiapx-video-api/prod.tfstate"
+    region       = "us-east-1"
     use_lockfile = true
     encrypt      = true
   }

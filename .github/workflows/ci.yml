@@ -2,7 +2,7 @@ name: ci
 
 # Checks de todo PR (spec §11.2): pint, phpstan, phpunit (cobertura ≥ 80%, com MySQL e LocalStack do
 # fiapx-infra/local), behat (SAGA), build da imagem + Trivy, kustomize + kubeconform e terraform validate.
-# O deploy (deploy.yml reutilizável, ADR-018), o OIDC e o SonarCloud entram na Etapa 8.
+# O deploy está em deploy.yml (ADR-018, credenciais da AWS Academy, ADR-019). O SonarCloud entra na Etapa 8.
 on:
   pull_request:
   push:

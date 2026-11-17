@@ -117,8 +117,9 @@ Como trabalhar aqui (detalhes no `README.md`):
   do S3; MIME aceito `video/*` ou `application/octet-stream`; `FIAPX_NOTIFY_ON_COMPLETED` (padrão `true`);
   imagem de produção `linux/amd64` (agente New Relic); `infra/` cria as rotas `/api/videos*`. Na AWS Academy
   (ADR-019) não há Pod Identity: pods e KEDA usam a `LabRole` dos nós.
-- Pendências para a Etapa 8: `deploy.yml` reutilizável (ADR-018), geração de `k8s/overlays/prod/aws.env` a partir
-  do SSM e do Secret `fiapx-video-api-db` a partir do Secrets Manager, SonarCloud.
+- `deploy.yml`/`destroy.yml` reutilizáveis (ADR-018) com as credenciais da AWS Academy (ADR-019): geram `aws.env`
+  do SSM e os Secrets do banco e do app, sobem a imagem no ECR, aplicam `infra/` e os manifests (migração antes
+  dos Deployments). A chave pública do JWT é lida do SSM pelo app. Pendente para a Etapa 8: SonarCloud.
 
 ## Skills deste repositório
 

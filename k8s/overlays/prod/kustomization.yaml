@@ -1,5 +1,5 @@
-# Produção. O deploy (Etapa 8, ADR-018) gera aws.env a partir do SSM, cria o Secret do banco a partir do
-# Secrets Manager e roda `kustomize edit set image fiapx-video-api=<ecr>:<sha>` antes do `kubectl apply -k`.
+# Produção. O deploy.yml (ADR-018) gera aws.env a partir do SSM, cria o Secret do banco a partir do Secrets
+# Manager e troca a imagem (newName/newTag) pela do ECR com o SHA do commit antes de aplicar.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
