@@ -22,6 +22,7 @@ use Mockery;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use Mockery\MockInterface;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\FakeTelemetry;
 
 abstract class ApplicationTestCase extends TestCase
 {
@@ -52,6 +53,8 @@ abstract class ApplicationTestCase extends TestCase
 
     protected MessageDeduplicator&MockInterface $deduplicator;
 
+    protected FakeTelemetry $telemetry;
+
     protected function setUp(): void
     {
         $this->now = new \DateTimeImmutable('2026-11-16T12:00:00Z');
@@ -81,6 +84,7 @@ abstract class ApplicationTestCase extends TestCase
         $this->transactions = Mockery::mock(TransactionManager::class);
         $this->transactions->allows('run')->andReturnUsing(fn (callable $fn) => $fn());
         $this->deduplicator = Mockery::mock(MessageDeduplicator::class);
+        $this->telemetry = new FakeTelemetry;
     }
 
     protected function messages(): MessageFactory

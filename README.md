@@ -68,6 +68,21 @@ Orquestrada aqui ([ADR-008](https://github.com/hackathon-fiap-soat/fiapx-docs/bl
 - **Agendados** (`schedule:run` a cada minuto): `saga:check-timeouts` (1 min), `videos:expire-pending` (5 min) e
   `messaging:prune` (diário, 7 dias).
 
+## Observabilidade
+
+Logs em JSON no stderr, lidos pelo New Relic, e dois eventos customizados
+([observabilidade.md](https://github.com/hackathon-fiap-soat/fiapx-docs/blob/main/07-observabilidade/observabilidade.md#eventos-customizados)),
+gravados pela porta `Telemetry` (Application) e pelo adapter `NewRelicTelemetry` (Infrastructure), que chama
+`newrelic_record_custom_event` só quando o agente está carregado (no local e nos testes é um no-op):
+
+- **`VideoSagaTransition`**: uma por mudança de estado da saga, depois do commit, com `trigger` = tipo da
+  mensagem recebida (`S3ObjectCreated`, `ProcessingStarted`, `VideoProcessed`, `VideoProcessingFailed`,
+  `ArtifactsCleaned`, `NotificationSent`) ou `Timeout`; `failure_reason` só em `COMPENSATING`/`COMPENSATED`. A
+  criação pelo `POST /api/videos` (`step` `RequestVideoUpload`, `trigger` `POST /api/videos`) e a expiração
+  (`ExpirePendingUpload`, `videos:expire-pending`) também emitem, com `saga_id`, `from_state` e `to_state` vazios.
+- **`SagaTimeoutCheck`**: a cada `saga:check-timeouts`, com `overdue_count` (sagas aguardando o processor com
+  prazo vencido no início) e `compensated_count`.
+
 ## Como rodar
 
 Pré-requisitos: Docker e os repositórios `fiapx-infra` e `fiapx-docs` clonados ao lado deste. O PHP roda no

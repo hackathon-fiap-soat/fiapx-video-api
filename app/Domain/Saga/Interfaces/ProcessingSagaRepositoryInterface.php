@@ -29,4 +29,7 @@ interface ProcessingSagaRepositoryInterface
      * @return list<string>
      */
     public function idsWithExpiredDeadline(\DateTimeImmutable $now, int $max): array;
+
+    /** Quantidade de sagas PROCESSING_REQUESTED ou PROCESSING com prazo vencido. */
+    public function countWithExpiredDeadline(\DateTimeImmutable $now): int;
 }

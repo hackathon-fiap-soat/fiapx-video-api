@@ -8,6 +8,7 @@ use App\Application\Shared\Ports\CommandBus;
 use App\Application\Shared\Ports\MessageDeduplicator;
 use App\Application\Shared\Ports\ObjectStorage;
 use App\Application\Shared\Ports\OutboxHousekeeping;
+use App\Application\Shared\Ports\Telemetry;
 use App\Application\Shared\Ports\TransactionManager;
 use App\Application\Shared\SagaSettings;
 use App\Domain\Quota\Interfaces\ProcessingQuotaRepositoryInterface;
@@ -20,6 +21,7 @@ use App\Infrastructure\Config\ParameterResolver;
 use App\Infrastructure\Messaging\MessageQueue;
 use App\Infrastructure\Messaging\OutboxCommandBus;
 use App\Infrastructure\Messaging\SqsQueue;
+use App\Infrastructure\Observability\NewRelicTelemetry;
 use App\Infrastructure\Persistence\DatabaseTransactionManager;
 use App\Infrastructure\Persistence\Eloquent\Repositories\DatabaseMessageDeduplicator;
 use App\Infrastructure\Persistence\Eloquent\Repositories\EloquentProcessingQuotaRepository;
@@ -51,6 +53,7 @@ final class RepositoryServiceProvider extends ServiceProvider
         IdGenerator::class => RamseyUuidV7Generator::class,
         ObjectStorage::class => S3ObjectStorage::class,
         MessageQueue::class => SqsQueue::class,
+        Telemetry::class => NewRelicTelemetry::class,
     ];
 
     public function register(): void

@@ -9,8 +9,10 @@ use App\Application\Messaging\MessageFactory;
 use App\Application\Saga\DTOs\SagaOutcome;
 use App\Application\Shared\Ports\CommandBus;
 use App\Application\Shared\Ports\MessageDeduplicator;
+use App\Application\Shared\Ports\Telemetry;
 use App\Application\Shared\Ports\TransactionManager;
 use App\Application\Shared\SagaSettings;
+use App\Application\Shared\Telemetry\VideoSagaTransition;
 use App\Domain\Quota\Interfaces\ProcessingQuotaRepositoryInterface;
 use App\Domain\Saga\Entities\ProcessingSaga;
 use App\Domain\Saga\Exceptions\InvalidSagaTransition;
@@ -25,7 +27,8 @@ use App\Domain\Video\ValueObjects\VideoId;
 /**
  * Aplica as respostas do processor e da notification à saga (spec §6). Tudo numa transação: o registro em
  * processed_messages (mensagem repetida vira no-op), a saga com lock otimista, o vídeo, a cota e os
- * comandos na outbox.
+ * comandos na outbox. Depois do commit, cada transição vira um evento VideoSagaTransition (trigger = tipo da
+ * resposta).
  *
  * @throws InvalidSagaTransition resposta fora de ordem: o consumidor descarta com warning
  */
@@ -41,11 +44,13 @@ final readonly class HandleSagaReplyUseCase
         private MessageFactory $messages,
         private Clock $clock,
         private SagaSettings $settings,
+        private Telemetry $telemetry,
     ) {}
 
     public function execute(IncomingReply $reply): SagaOutcome
     {
-        return $this->transactions->run(function () use ($reply): SagaOutcome {
+        $transitions = [];
+        $outcome = $this->transactions->run(function () use ($reply, &$transitions): SagaOutcome {
             if (! $this->deduplicator->register($reply->messageId, $reply->type)) {
                 return SagaOutcome::Duplicate;
             }
@@ -59,6 +64,7 @@ final readonly class HandleSagaReplyUseCase
             }
 
             $now = $this->clock->now();
+            $historyBefore = count($saga->history());
             match ($reply->type) {
                 'ProcessingStarted' => $this->started($saga, $video, $now),
                 'VideoProcessed' => $this->processed($saga, $video, $reply, $now),
@@ -71,9 +77,16 @@ final readonly class HandleSagaReplyUseCase
 
             $this->sagas->save($saga);
             $this->videos->save($video);
+            $transitions = VideoSagaTransition::fromSaga($saga, $video, $historyBefore, $reply->type);
 
             return SagaOutcome::Applied;
         });
+
+        foreach ($transitions as $transition) {
+            $this->telemetry->recordTransition($transition);
+        }
+
+        return $outcome;
     }
 
     private function started(ProcessingSaga $saga, Video $video, \DateTimeImmutable $now): void

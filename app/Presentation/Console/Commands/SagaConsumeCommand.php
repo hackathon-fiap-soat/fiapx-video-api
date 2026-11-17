@@ -12,6 +12,7 @@ use App\Infrastructure\Config\ParameterResolver;
 use App\Infrastructure\Messaging\MessageQueue;
 use App\Infrastructure\Messaging\ReceivedMessage;
 use App\Infrastructure\Messaging\S3EventParser;
+use App\Infrastructure\Support\NewRelic;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
@@ -41,7 +42,7 @@ final class SagaConsumeCommand extends Command
             $handled = 0;
             foreach ($queue->receive($uploads, $wait, (int) config('fiapx.consumer.max_messages')) as $message) {
                 $handled++;
-                $this->consume($queue, $uploads, $message, function () use ($parser, $start, $message): array {
+                $this->consume($queue, $uploads, $message, 'SagaConsumer/S3ObjectCreated', function () use ($parser, $start, $message): array {
                     $outcomes = [];
                     foreach ($parser->parse($message->messageId, $message->body) as $event) {
                         $outcomes[] = $start->execute($event)->value.':'.$event->key;
@@ -52,8 +53,9 @@ final class SagaConsumeCommand extends Command
             }
             foreach ($queue->receive($sagaReplies, $wait, (int) config('fiapx.consumer.max_messages')) as $message) {
                 $handled++;
-                $this->consume($queue, $sagaReplies, $message, function () use ($replies, $message): array {
+                $this->consume($queue, $sagaReplies, $message, 'SagaConsumer/SagaReply', function () use ($replies, $message): array {
                     $reply = IncomingReply::fromEnvelope((array) json_decode($message->body, true));
+                    NewRelic::nameTransaction("SagaConsumer/{$reply->type}");
                     Log::withContext(['saga_id' => $reply->sagaId, 'video_id' => $reply->videoId, 'correlation_id' => $reply->correlationId]);
 
                     return ['type' => $reply->type, 'outcome' => $replies->execute($reply)->value];
@@ -64,10 +66,16 @@ final class SagaConsumeCommand extends Command
         return self::SUCCESS;
     }
 
-    /** @param callable(): array<string, mixed> $handler */
-    private function consume(MessageQueue $queue, string $queueUrl, ReceivedMessage $message, callable $handler): void
+    /**
+     * Cada mensagem é uma transação de background no New Relic: os eventos customizados registrados no caso de
+     * uso são enviados quando ela termina.
+     *
+     * @param  callable(): array<string, mixed>  $handler
+     */
+    private function consume(MessageQueue $queue, string $queueUrl, ReceivedMessage $message, string $transaction, callable $handler): void
     {
         $context = ['sqs_message_id' => $message->messageId];
+        NewRelic::startTransaction($transaction, $context);
         try {
             Log::info('mensagem tratada', $context + $handler());
             $queue->delete($queueUrl, $message);
@@ -81,8 +89,10 @@ final class SagaConsumeCommand extends Command
         } catch (\Throwable $e) {
             // Falha transitória (banco, S3, lock otimista): a mensagem volta para a fila.
             Log::error('falha ao tratar mensagem; ela volta para a fila', $context + ['error' => $e->getMessage(), 'exception' => $e::class]);
+            NewRelic::noticeError($e);
         } finally {
             Log::withoutContext(['saga_id', 'video_id', 'correlation_id']);
+            NewRelic::endTransaction();
         }
     }
 }

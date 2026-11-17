@@ -26,6 +26,7 @@ final class VideoController
         $out = $useCase->execute(new RequestVideoUploadInput(
             $user->id, $user->email, $user->name,
             (string) $request->validated('filename'), (int) $request->validated('size_bytes'), (string) $request->validated('content_type'),
+            (string) $request->attributes->get('correlation_id', ''),
         ));
 
         return response()->json([

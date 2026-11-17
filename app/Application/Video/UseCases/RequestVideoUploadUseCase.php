@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Application\Video\UseCases;
 
 use App\Application\Shared\Ports\ObjectStorage;
+use App\Application\Shared\Ports\Telemetry;
 use App\Application\Shared\SagaSettings;
+use App\Application\Shared\Telemetry\VideoSagaTransition;
 use App\Application\Video\DTOs\RequestVideoUploadInput;
 use App\Application\Video\DTOs\VideoUploadCreated;
 use App\Domain\Shared\Interfaces\Clock;
@@ -19,7 +21,8 @@ use App\Domain\Video\ValueObjects\VideoId;
 
 /**
  * POST /api/videos: registra o vídeo em PENDING_UPLOAD e devolve o POST pré-assinado do S3. O tamanho
- * declarado é o limite do content-length-range: o S3 recusa um arquivo maior (ADR-006).
+ * declarado é o limite do content-length-range: o S3 recusa um arquivo maior (ADR-006). Depois de gravar,
+ * registra o VideoSagaTransition da criação (step RequestVideoUpload, sem saga).
  */
 final readonly class RequestVideoUploadUseCase
 {
@@ -29,6 +32,7 @@ final readonly class RequestVideoUploadUseCase
         private IdGenerator $ids,
         private Clock $clock,
         private SagaSettings $settings,
+        private Telemetry $telemetry,
     ) {}
 
     public function execute(RequestVideoUploadInput $input): VideoUploadCreated
@@ -43,6 +47,7 @@ final readonly class RequestVideoUploadUseCase
         );
         $ticket = $this->storage->presignUpload($video->videoKey, $video->contentType, $video->sizeBytes, $this->settings->uploadTtlSeconds);
         $this->videos->add($video);
+        $this->telemetry->recordTransition(VideoSagaTransition::videoCreated($video, $input->correlationId));
 
         return new VideoUploadCreated($video->id->value, $video->status()->value, $ticket);
     }
