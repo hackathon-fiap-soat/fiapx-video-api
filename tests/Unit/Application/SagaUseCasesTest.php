@@ -57,19 +57,20 @@ final class SagaUseCasesTest extends ApplicationTestCase
         });
         $this->sagas->allows('save');
         $this->deduplicator->allows('register')->andReturnTrue()->byDefault();
+        $this->videos->allows('find')->andReturnNull()->byDefault();
     }
 
     private function start(?StoredObject $head, ?string $key = null): SagaOutcome
     {
         $this->storage->allows('head')->andReturn($head);
 
-        return (new StartProcessingSagaUseCase($this->videos, $this->sagas, $this->quotas, $this->storage, $this->commands, $this->deduplicator, $this->transactions, $this->messages(), $this->ids, $this->clock, $this->settings))
+        return (new StartProcessingSagaUseCase($this->videos, $this->sagas, $this->quotas, $this->storage, $this->commands, $this->deduplicator, $this->transactions, $this->messages(), $this->ids, $this->clock, $this->settings, $this->telemetry))
             ->execute(new UploadedObjectEvent(self::EVENT, 'fiapx-local-videos', $key ?? 'uploads/'.self::VIDEO.'.mp4', 1000));
     }
 
     private function reply(): HandleSagaReplyUseCase
     {
-        return new HandleSagaReplyUseCase($this->sagas, $this->videos, $this->quotas, $this->commands, $this->deduplicator, $this->transactions, $this->messages(), $this->clock, $this->settings);
+        return new HandleSagaReplyUseCase($this->sagas, $this->videos, $this->quotas, $this->commands, $this->deduplicator, $this->transactions, $this->messages(), $this->clock, $this->settings, $this->telemetry);
     }
 
     private function envelope(string $type, array $payload, string $id = '0192f1c4-2222-7000-8000-000000000001'): IncomingReply
@@ -140,7 +141,7 @@ final class SagaUseCasesTest extends ApplicationTestCase
     {
         $this->storage->shouldNotReceive('head');
         self::assertSame(SagaOutcome::Ignored, $this->start(null, 'uploads/qualquer.mp4'));
-        $uc = new StartProcessingSagaUseCase($this->videos, $this->sagas, $this->quotas, $this->storage, $this->commands, $this->deduplicator, $this->transactions, $this->messages(), $this->ids, $this->clock, $this->settings);
+        $uc = new StartProcessingSagaUseCase($this->videos, $this->sagas, $this->quotas, $this->storage, $this->commands, $this->deduplicator, $this->transactions, $this->messages(), $this->ids, $this->clock, $this->settings, $this->telemetry);
         self::assertSame(SagaOutcome::Ignored, $uc->execute(new UploadedObjectEvent(self::EVENT, 'outro-bucket', 'uploads/'.self::VIDEO.'.mp4', 1)));
     }
 
@@ -276,7 +277,7 @@ final class SagaUseCasesTest extends ApplicationTestCase
     public function test_timeouts(): void
     {
         [, $saga] = $this->emProcessamento();
-        $uc = new CheckSagaTimeoutsUseCase($this->sagas, $this->commands, $this->transactions, $this->messages(), $this->clock);
+        $uc = new CheckSagaTimeoutsUseCase($this->sagas, $this->videos, $this->commands, $this->transactions, $this->messages(), $this->clock, $this->telemetry);
         $this->sagas->expects('idsWithExpiredDeadline')->andReturn([self::SAGA]);
         self::assertSame([self::SAGA], $uc->expiredSagaIds());
 
@@ -297,5 +298,164 @@ final class SagaUseCasesTest extends ApplicationTestCase
         $outbox->expects('prunePublishedBefore')->withArgs(fn ($l) => $l == $this->now->modify('-7 days'))->andReturn(3);
         $this->deduplicator->expects('pruneOlderThan')->andReturn(5);
         self::assertSame(['outbox' => 3, 'processed_messages' => 5], (new PruneMessagingUseCase($outbox, $this->deduplicator, $this->clock, $this->settings))->execute());
+    }
+
+    // --- Eventos VideoSagaTransition e SagaTimeoutCheck (observabilidade.md) ------------------------------
+
+    public function test_evento_do_inicio_da_saga_emite_cada_transicao(): void
+    {
+        $video = $this->video();
+        $this->videos->expects('findForUpdate')->andReturn($video);
+        $this->sagas->expects('findByVideo')->andReturnNull();
+
+        $this->start(new StoredObject(1000, 'video/mp4'));
+
+        self::assertSame([
+            'NONE → STARTED (ValidateUpload, S3ObjectCreated)',
+            'STARTED → UPLOAD_VALIDATED (ValidateUpload, S3ObjectCreated)',
+            'UPLOAD_VALIDATED → QUOTA_RESERVED (ReserveQuota, S3ObjectCreated)',
+            'QUOTA_RESERVED → PROCESSING_REQUESTED (ProcessVideo, S3ObjectCreated)',
+        ], $this->telemetry->summary());
+        self::assertSame([
+            'video_id' => self::VIDEO,
+            'saga_id' => $this->sagaGravada?->id,
+            'correlation_id' => self::EVENT,
+            'user_id' => self::USER,
+            'from_state' => 'NONE',
+            'to_state' => 'STARTED',
+            'step' => 'ValidateUpload',
+            'duration_ms' => 0,
+            'video_status' => 'QUEUED',
+            'trigger' => 'S3ObjectCreated',
+        ], $this->telemetry->transitions()[0]);
+        foreach ($this->telemetry->transitions() as $t) {
+            self::assertArrayNotHasKey('failure_reason', $t);
+        }
+    }
+
+    public function test_evento_da_falha_local_traz_failure_reason(): void
+    {
+        $video = $this->video();
+        $this->videos->expects('findForUpdate')->andReturn($video);
+        $this->sagas->expects('findByVideo')->andReturnNull();
+        $this->storage->expects('delete');
+
+        $this->start(new StoredObject(600 * 1024 * 1024, 'video/mp4'));
+
+        self::assertSame([
+            'NONE → STARTED (ValidateUpload, S3ObjectCreated)',
+            'STARTED → COMPENSATING (DeleteUploadedObject, S3ObjectCreated)',
+            'COMPENSATING → COMPENSATED (DeleteUploadedObject, S3ObjectCreated)',
+        ], $this->telemetry->summary());
+        $t = $this->telemetry->transitions();
+        self::assertArrayNotHasKey('failure_reason', $t[0]);
+        self::assertSame('INVALID_UPLOAD', $t[1]['failure_reason']);
+        self::assertSame('INVALID_UPLOAD', $t[2]['failure_reason']);
+        self::assertSame('FAILED', $t[2]['video_status']);
+    }
+
+    public function test_evento_da_cota_excedida(): void
+    {
+        $this->quota = ProcessingQuota::restore(self::USER, 5, 5);
+        $this->videos->expects('findForUpdate')->andReturn($this->video());
+        $this->sagas->expects('findByVideo')->andReturnNull();
+        $this->storage->expects('delete');
+
+        $this->start(new StoredObject(1000, 'video/mp4'));
+
+        $ultima = $this->telemetry->transitions()[3];
+        self::assertSame(['UPLOAD_VALIDATED', 'COMPENSATED', 'QUOTA_EXCEEDED'], [$this->telemetry->transitions()[2]['from_state'], $ultima['to_state'], $ultima['failure_reason']]);
+    }
+
+    public function test_sem_evento_quando_a_mensagem_e_duplicada_ignorada_ou_recusada(): void
+    {
+        $this->deduplicator->expects('register')->andReturnFalse();
+        $this->start(new StoredObject(1, 'video/mp4'));
+        self::assertSame([], $this->telemetry->events);
+
+        $this->setUp();
+        $this->sagas->expects('find')->andReturnNull();
+        $this->reply()->execute($this->envelope('ProcessingStarted', []));
+        self::assertSame([], $this->telemetry->events);
+
+        $this->setUp();
+        [$video, $saga] = $this->emProcessamento();
+        $saga->processingFailed(FailureReason::FfmpegError, $this->now);
+        $this->sagas->allows('find')->andReturn($saga);
+        $this->videos->allows('findForUpdate')->andReturn($video);
+        try {
+            $this->reply()->execute($this->envelope('VideoProcessed', ['zip_key' => 'results/'.self::VIDEO.'/frames.zip', 'frame_count' => 1], '0192f1c4-2222-7000-8000-000000000009'));
+            self::fail('a resposta fora de ordem deveria lançar');
+        } catch (InvalidSagaTransition) {
+            self::assertSame([], $this->telemetry->events, 'nada é emitido sem commit');
+        }
+    }
+
+    public function test_eventos_da_conclusao_com_duracao_em_cada_estado(): void
+    {
+        [$video, $saga] = $this->emProcessamento();
+        $this->quota->reserve();
+        $this->sagas->allows('find')->andReturn($saga);
+        $this->videos->allows('findForUpdate')->andReturn($video);
+
+        $this->clock->at = $this->now->modify('+2 seconds');
+        $this->reply()->execute($this->envelope('ProcessingStarted', ['started_at' => '2026-11-16T12:00:02Z', 'worker_id' => 'w1']));
+        $this->clock->at = $this->now->modify('+5 seconds');
+        $this->reply()->execute($this->envelope('VideoProcessed', ['zip_key' => 'results/'.self::VIDEO.'/frames.zip', 'frame_count' => 3], '0192f1c4-2222-7000-8000-000000000002'));
+        $this->clock->at = $this->now->modify('+5500 milliseconds');
+        $this->reply()->execute($this->envelope('NotificationSent', ['channel' => 'EMAIL'], '0192f1c4-2222-7000-8000-000000000003'));
+
+        self::assertSame([
+            'PROCESSING_REQUESTED → PROCESSING (ProcessVideo, ProcessingStarted)',
+            'PROCESSING → COMPLETED (CompleteVideo, VideoProcessed)',
+            'COMPLETED → NOTIFIED (NotifyUser, NotificationSent)',
+        ], $this->telemetry->summary());
+        $t = $this->telemetry->transitions();
+        self::assertSame([2000, 3000, 500], array_column($t, 'duration_ms'));
+        self::assertSame(['PROCESSING', 'COMPLETED', 'COMPLETED'], array_column($t, 'video_status'));
+        self::assertSame([self::SAGA, self::EVENT, self::USER], [$t[1]['saga_id'], $t[1]['correlation_id'], $t[1]['user_id']]);
+    }
+
+    public function test_eventos_da_compensacao_por_falha_do_processor(): void
+    {
+        [$video, $saga] = $this->emProcessamento();
+        $this->quota->reserve();
+        $this->sagas->allows('find')->andReturn($saga);
+        $this->videos->allows('findForUpdate')->andReturn($video);
+
+        $this->clock->at = $this->now->modify('+10 seconds');
+        $this->reply()->execute($this->envelope('VideoProcessingFailed', ['error_code' => 'NO_FRAMES', 'error_message' => 'x', 'attempt' => 1]));
+        $this->clock->at = $this->now->modify('+12 seconds');
+        $this->reply()->execute($this->envelope('ArtifactsCleaned', ['deleted_objects' => 0], '0192f1c4-2222-7000-8000-000000000002'));
+        $this->reply()->execute($this->envelope('NotificationFailed', ['channel' => 'EMAIL', 'error' => 'SMTP'], '0192f1c4-2222-7000-8000-000000000003'));
+
+        self::assertSame([
+            'PROCESSING_REQUESTED → COMPENSATING (CleanupArtifacts, VideoProcessingFailed)',
+            'COMPENSATING → COMPENSATED (ReleaseQuota, ArtifactsCleaned)',
+        ], $this->telemetry->summary(), 'NotificationFailed não muda o estado: sem evento');
+        $t = $this->telemetry->transitions();
+        self::assertSame(['NO_FRAMES', 'NO_FRAMES'], array_column($t, 'failure_reason'));
+        self::assertSame([10000, 2000], array_column($t, 'duration_ms'));
+        self::assertSame(['QUEUED', 'FAILED'], array_column($t, 'video_status'));
+    }
+
+    public function test_eventos_do_timeout_e_do_saga_timeout_check(): void
+    {
+        [$video, $saga] = $this->emProcessamento();
+        $uc = new CheckSagaTimeoutsUseCase($this->sagas, $this->videos, $this->commands, $this->transactions, $this->messages(), $this->clock, $this->telemetry);
+        $this->sagas->allows('find')->andReturn($saga);
+        $this->videos->allows('find')->andReturn($video);
+        $this->sagas->expects('countWithExpiredDeadline')->andReturn(2);
+        $this->clock->at = $this->now->modify('+31 minutes');
+
+        $overdue = $uc->overdueCount();
+        $uc->timeOut(self::SAGA);
+        $uc->timeOut(self::SAGA);
+        $uc->finishCheck($overdue, 1);
+
+        self::assertSame(['PROCESSING_REQUESTED → COMPENSATING (CleanupArtifacts, Timeout)'], $this->telemetry->summary());
+        $t = $this->telemetry->transitions()[0];
+        self::assertSame(['PROCESSING_TIMEOUT', 1860000, 'QUEUED'], [$t['failure_reason'], $t['duration_ms'], $t['video_status']]);
+        self::assertSame(['type' => 'SagaTimeoutCheck', 'attributes' => ['overdue_count' => 2, 'compensated_count' => 1]], $this->telemetry->events[1]);
     }
 }

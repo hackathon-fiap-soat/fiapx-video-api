@@ -13,6 +13,7 @@ use App\Domain\Saga\ValueObjects\SagaStep;
 use App\Domain\Video\ValueObjects\VideoId;
 use App\Infrastructure\Persistence\Eloquent\Models\ProcessingSagaModel;
 use App\Infrastructure\Support\Dates;
+use Illuminate\Database\Eloquent\Builder;
 
 final class EloquentProcessingSagaRepository implements ProcessingSagaRepositoryInterface
 {
@@ -53,10 +54,21 @@ final class EloquentProcessingSagaRepository implements ProcessingSagaRepository
 
     public function idsWithExpiredDeadline(\DateTimeImmutable $now, int $max): array
     {
+        return $this->expiredDeadline($now)
+            ->orderBy('deadline_at')->limit($max)->pluck('id')->map(fn ($id) => (string) $id)->all();
+    }
+
+    public function countWithExpiredDeadline(\DateTimeImmutable $now): int
+    {
+        return $this->expiredDeadline($now)->count();
+    }
+
+    /** @return Builder<ProcessingSagaModel> */
+    private function expiredDeadline(\DateTimeImmutable $now): Builder
+    {
         return ProcessingSagaModel::query()
             ->whereIn('state', [SagaState::ProcessingRequested->value, SagaState::Processing->value])
-            ->where('deadline_at', '<=', Dates::toDb($now))
-            ->orderBy('deadline_at')->limit($max)->pluck('id')->map(fn ($id) => (string) $id)->all();
+            ->where('deadline_at', '<=', Dates::toDb($now));
     }
 
     /** @return array<string, mixed> */

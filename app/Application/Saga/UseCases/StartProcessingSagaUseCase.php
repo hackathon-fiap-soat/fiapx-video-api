@@ -10,8 +10,10 @@ use App\Application\Saga\DTOs\UploadedObjectEvent;
 use App\Application\Shared\Ports\CommandBus;
 use App\Application\Shared\Ports\MessageDeduplicator;
 use App\Application\Shared\Ports\ObjectStorage;
+use App\Application\Shared\Ports\Telemetry;
 use App\Application\Shared\Ports\TransactionManager;
 use App\Application\Shared\SagaSettings;
+use App\Application\Shared\Telemetry\VideoSagaTransition;
 use App\Application\Video\DTOs\StoredObject;
 use App\Domain\Quota\Interfaces\ProcessingQuotaRepositoryInterface;
 use App\Domain\Saga\Entities\ProcessingSaga;
@@ -30,9 +32,13 @@ use App\Domain\Video\ValueObjects\VideoStatus;
  * Início da SAGA pelo evento do S3 (spec §6.1, passos 1 e 2). O HeadObject é feito antes; depois, numa só
  * transação: saga, ValidateUpload, ReserveQuota, ProcessVideo na outbox, status do vídeo e
  * processed_messages. Na falha local, a compensação DeleteUploadedObject apaga o arquivo depois do commit.
+ * Depois do commit, cada transição da saga vira um evento VideoSagaTransition (trigger S3ObjectCreated).
  */
 final readonly class StartProcessingSagaUseCase
 {
+    /** Tipo da mensagem que inicia a saga (registro em processed_messages e trigger do VideoSagaTransition). */
+    private const TRIGGER = 'S3ObjectCreated';
+
     public function __construct(
         private VideoRepositoryInterface $videos,
         private ProcessingSagaRepositoryInterface $sagas,
@@ -45,6 +51,7 @@ final readonly class StartProcessingSagaUseCase
         private IdGenerator $ids,
         private Clock $clock,
         private SagaSettings $settings,
+        private Telemetry $telemetry,
     ) {}
 
     public function execute(UploadedObjectEvent $event): SagaOutcome
@@ -56,8 +63,9 @@ final readonly class StartProcessingSagaUseCase
         $key = StorageKey::fromString($event->key);
         $head = $this->storage->head($key);
 
-        $outcome = $this->transactions->run(function () use ($event, $videoId, $key, $head): SagaOutcome {
-            if (! $this->deduplicator->register($event->eventId, 'S3ObjectCreated')) {
+        $transitions = [];
+        $outcome = $this->transactions->run(function () use ($event, $videoId, $key, $head, &$transitions): SagaOutcome {
+            if (! $this->deduplicator->register($event->eventId, self::TRIGGER)) {
                 return SagaOutcome::Duplicate;
             }
             $video = $this->videos->findForUpdate($videoId);
@@ -73,7 +81,7 @@ final readonly class StartProcessingSagaUseCase
             if (! $this->uploadIsValid($key, $head)) {
                 $saga->rejectUpload($now);
 
-                return $this->failLocally($saga, $video, FailureReason::InvalidUpload, $now);
+                return $this->failLocally($saga, $video, FailureReason::InvalidUpload, $now, $transitions);
             }
             $saga->uploadValidated($now);
 
@@ -81,7 +89,7 @@ final readonly class StartProcessingSagaUseCase
             if (! $quota->canReserve()) {
                 $saga->rejectQuota($now);
 
-                return $this->failLocally($saga, $video, FailureReason::QuotaExceeded, $now);
+                return $this->failLocally($saga, $video, FailureReason::QuotaExceeded, $now, $transitions);
             }
             $quota->reserve();
             $this->quotas->save($quota);
@@ -93,9 +101,14 @@ final readonly class StartProcessingSagaUseCase
 
             $this->sagas->add($saga);
             $this->videos->save($video);
+            $transitions = VideoSagaTransition::fromSaga($saga, $video, 0, self::TRIGGER);
 
             return SagaOutcome::Started;
         });
+
+        foreach ($transitions as $transition) {
+            $this->telemetry->recordTransition($transition);
+        }
 
         if ($outcome === SagaOutcome::Rejected) {
             $this->storage->delete($key);
@@ -113,14 +126,19 @@ final readonly class StartProcessingSagaUseCase
             && VideoFormat::isAcceptedMimeType($head->contentType);
     }
 
-    /** Falha nos passos locais: vídeo FAILED, saga COMPENSATED e VIDEO_FAILED na outbox. */
-    private function failLocally(ProcessingSaga $saga, Video $video, FailureReason $reason, \DateTimeImmutable $now): SagaOutcome
+    /**
+     * Falha nos passos locais: vídeo FAILED, saga COMPENSATED e VIDEO_FAILED na outbox.
+     *
+     * @param  list<VideoSagaTransition>  $transitions  preenchida com as transições, emitidas depois do commit
+     */
+    private function failLocally(ProcessingSaga $saga, Video $video, FailureReason $reason, \DateTimeImmutable $now, array &$transitions): SagaOutcome
     {
         $video->fail($reason, $now);
         $saga->compensatedLocally($now);
         $this->commands->dispatch($this->messages->videoFailed($saga, $video));
         $this->sagas->add($saga);
         $this->videos->save($video);
+        $transitions = VideoSagaTransition::fromSaga($saga, $video, 0, self::TRIGGER);
 
         return SagaOutcome::Rejected;
     }

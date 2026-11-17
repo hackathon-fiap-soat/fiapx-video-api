@@ -34,7 +34,7 @@ final class VideoUseCasesTest extends ApplicationTestCase
             ->andReturn(new UploadTicket('http://s3/bucket', ['key' => 'k'], $this->now->modify('+1 hour')));
         $videos->expects('add')->withArgs(fn (Video $v) => $v->status() === VideoStatus::PendingUpload && $v->owner->email === 'ana@exemplo.com');
 
-        $out = (new RequestVideoUploadUseCase($videos, $storage, $this->ids, $this->clock, $this->settings))
+        $out = (new RequestVideoUploadUseCase($videos, $storage, $this->ids, $this->clock, $this->settings, $this->telemetry))
             ->execute(new RequestVideoUploadInput(self::USER, 'ANA@exemplo.com', 'Ana', 'Aula.MOV', 73400320, 'video/quicktime'));
 
         self::assertSame('PENDING_UPLOAD', $out->status);
@@ -46,7 +46,7 @@ final class VideoUseCasesTest extends ApplicationTestCase
         $videos = Mockery::mock(VideoRepositoryInterface::class);
         $videos->shouldNotReceive('add');
         $this->expectException(\InvalidArgumentException::class);
-        (new RequestVideoUploadUseCase($videos, Mockery::mock(ObjectStorage::class), $this->ids, $this->clock, $this->settings))
+        (new RequestVideoUploadUseCase($videos, Mockery::mock(ObjectStorage::class), $this->ids, $this->clock, $this->settings, $this->telemetry))
             ->execute(new RequestVideoUploadInput(self::USER, 'ana@exemplo.com', 'Ana', 'foto.png', 10, 'image/png'));
     }
 
@@ -132,8 +132,57 @@ final class VideoUseCasesTest extends ApplicationTestCase
         $videos->expects('pendingUploadCreatedBefore')->withArgs(fn (\DateTimeImmutable $l) => $l == $this->now->modify('-3600 seconds'))->andReturn([$pendente, $pendente]);
         $videos->expects('findForUpdate')->twice()->andReturn($pendente, $jaEnviado);
         $videos->expects('save')->once()->with($pendente);
-        $n = (new ExpirePendingUploadsUseCase($videos, $this->transactions, $this->clock, $this->settings))->execute();
+        $n = (new ExpirePendingUploadsUseCase($videos, $this->transactions, $this->clock, $this->settings, $this->telemetry))->execute();
         self::assertSame(1, $n);
         self::assertSame(VideoStatus::Expired, $pendente->status());
+    }
+
+    public function test_criacao_emite_video_saga_transition_sem_saga(): void
+    {
+        $videos = Mockery::mock(VideoRepositoryInterface::class);
+        $videos->allows('add');
+        $storage = Mockery::mock(ObjectStorage::class);
+        $storage->allows('presignUpload')->andReturn(new UploadTicket('http://s3/bucket', [], $this->now));
+
+        $out = (new RequestVideoUploadUseCase($videos, $storage, $this->ids, $this->clock, $this->settings, $this->telemetry))
+            ->execute(new RequestVideoUploadInput(self::USER, 'ana@exemplo.com', 'Ana', 'aula.mp4', 10, 'video/mp4', self::EVENT));
+
+        self::assertSame([[
+            'video_id' => $out->id,
+            'saga_id' => '',
+            'correlation_id' => self::EVENT,
+            'user_id' => self::USER,
+            'from_state' => '',
+            'to_state' => '',
+            'step' => 'RequestVideoUpload',
+            'duration_ms' => 0,
+            'video_status' => 'PENDING_UPLOAD',
+            'trigger' => 'POST /api/videos',
+        ]], $this->telemetry->transitions());
+    }
+
+    public function test_expiracao_emite_video_saga_transition_com_tempo_pendente(): void
+    {
+        $pendente = $this->video();
+        $videos = Mockery::mock(VideoRepositoryInterface::class);
+        $videos->allows('pendingUploadCreatedBefore')->andReturn([$pendente]);
+        $videos->allows('findForUpdate')->andReturn($pendente);
+        $videos->allows('save');
+        $this->clock->at = $this->now->modify('+2 hours');
+
+        (new ExpirePendingUploadsUseCase($videos, $this->transactions, $this->clock, $this->settings, $this->telemetry))->execute();
+
+        self::assertSame([[
+            'video_id' => self::VIDEO,
+            'saga_id' => '',
+            'correlation_id' => '',
+            'user_id' => self::USER,
+            'from_state' => '',
+            'to_state' => '',
+            'step' => 'ExpirePendingUpload',
+            'duration_ms' => 7200000,
+            'video_status' => 'EXPIRED',
+            'trigger' => 'videos:expire-pending',
+        ]], $this->telemetry->transitions());
     }
 }

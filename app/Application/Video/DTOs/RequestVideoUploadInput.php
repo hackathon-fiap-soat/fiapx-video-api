@@ -13,5 +13,6 @@ final readonly class RequestVideoUploadInput
         public string $filename,
         public int $sizeBytes,
         public string $contentType,
+        public string $correlationId = '',
     ) {}
 }

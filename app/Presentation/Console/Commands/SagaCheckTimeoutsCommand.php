@@ -8,7 +8,7 @@ use App\Application\Saga\UseCases\CheckSagaTimeoutsUseCase;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
-/** saga:check-timeouts (agendado a cada minuto). Uma saga com erro não impede as outras. */
+/** saga:check-timeouts (agendado a cada minuto). Uma saga com erro não impede as outras. Registra o SagaTimeoutCheck. */
 final class SagaCheckTimeoutsCommand extends Command
 {
     protected $signature = 'saga:check-timeouts';
@@ -17,6 +17,7 @@ final class SagaCheckTimeoutsCommand extends Command
 
     public function handle(CheckSagaTimeoutsUseCase $useCase): int
     {
+        $overdue = $useCase->overdueCount();
         $compensated = 0;
         foreach ($useCase->expiredSagaIds() as $id) {
             try {
@@ -28,6 +29,7 @@ final class SagaCheckTimeoutsCommand extends Command
                 Log::error('falha ao compensar saga vencida', ['saga_id' => $id, 'error' => $e->getMessage()]);
             }
         }
+        $useCase->finishCheck($overdue, $compensated);
         $this->info("{$compensated} saga(s) compensada(s) por timeout.");
 
         return self::SUCCESS;
