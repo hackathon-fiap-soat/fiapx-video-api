@@ -6,6 +6,8 @@ name: deploy
 on:
   push:
     branches: [main]
+    # Mudança só de documentação ou de contexto do Claude não reimplanta o serviço.
+    paths-ignore: ["**.md", ".claude/**", "docs/**", "LICENSE"]
   workflow_call:
   workflow_dispatch:
 
