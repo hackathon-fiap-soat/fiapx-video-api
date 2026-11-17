@@ -51,8 +51,12 @@ RUN set -eux; \
       echo 'newrelic.appname = "${NEW_RELIC_APP_NAME}"'; \
       echo 'newrelic.distributed_tracing_enabled = true'; \
       echo 'newrelic.application_logging.forwarding.enabled = true'; \
-      echo 'newrelic.daemon.address = "${NEW_RELIC_DAEMON_ADDRESS}"'; } > "$PHP_INI_DIR/conf.d/newrelic.ini"
-ENV NEW_RELIC_ENABLED=false NEW_RELIC_APP_NAME=fiapx-video-api NEW_RELIC_DAEMON_ADDRESS=@newrelic NEW_RELIC_LICENSE_KEY=""
+      echo 'newrelic.daemon.address = "${NEW_RELIC_DAEMON_ADDRESS}"'; \
+      echo 'newrelic.daemon.app_connect_timeout = "${NEW_RELIC_APP_CONNECT_TIMEOUT}"'; } > "$PHP_INI_DIR/conf.d/newrelic.ini"
+# Daemon local (@newrelic) nos processos longos; o CronJob aponta para o daemon compartilhado
+# (newrelic-php-daemon:31339) e espera a conexão do app (NEW_RELIC_APP_CONNECT_TIMEOUT=15s; 0 = não espera).
+ENV NEW_RELIC_ENABLED=false NEW_RELIC_APP_NAME=fiapx-video-api NEW_RELIC_DAEMON_ADDRESS=@newrelic NEW_RELIC_LICENSE_KEY="" \
+    NEW_RELIC_APP_CONNECT_TIMEOUT=0
 
 COPY docker/php/prod.ini "$PHP_INI_DIR/conf.d/zz-fiapx.ini"
 COPY docker/php/www.conf /usr/local/etc/php-fpm.d/zz-fiapx.conf

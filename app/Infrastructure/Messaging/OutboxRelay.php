@@ -7,6 +7,7 @@ namespace App\Infrastructure\Messaging;
 use App\Application\Messaging\Destination;
 use App\Infrastructure\Config\ParameterResolver;
 use App\Infrastructure\Support\Dates;
+use App\Infrastructure\Support\NewRelic;
 use Aws\Sqs\SqsClient;
 use Illuminate\Support\Facades\DB;
 use Psr\Log\LoggerInterface;
@@ -20,16 +21,17 @@ final readonly class OutboxRelay
 {
     public function __construct(private SqsClient $sqs, private ParameterResolver $parameters, private LoggerInterface $log) {}
 
-    /** Publica um lote; devolve quantas mensagens foram enviadas. */
-    public function publishBatch(int $limit = 10): int
+    /** Publica um lote; devolve quantas mensagens foram enviadas e quantas falharam. */
+    public function publishBatch(int $limit = 10): OutboxBatchResult
     {
-        return DB::transaction(function () use ($limit): int {
+        return DB::transaction(function () use ($limit): OutboxBatchResult {
             $rows = DB::select(
                 'SELECT id, destination, type, payload, attempts FROM outbox_messages
                  WHERE published_at IS NULL ORDER BY created_at, id LIMIT ? FOR UPDATE SKIP LOCKED',
                 [$limit],
             );
             $sent = 0;
+            $failed = 0;
             foreach ($rows as $row) {
                 $envelope = json_decode((string) $row->payload, true, 512, JSON_THROW_ON_ERROR);
                 try {
@@ -47,11 +49,13 @@ final readonly class OutboxRelay
                         'saga_id' => $envelope['saga_id'], 'video_id' => $envelope['video_id'], 'correlation_id' => $envelope['correlation_id']]);
                 } catch (\Throwable $e) {
                     DB::update('UPDATE outbox_messages SET attempts = LEAST(attempts + 1, 255) WHERE id = ?', [$row->id]);
+                    $failed++;
+                    NewRelic::noticeError($e);
                     $this->log->error('falha ao publicar comando', ['message_id' => $row->id, 'type' => $row->type, 'error' => $e->getMessage()]);
                 }
             }
 
-            return $sent;
+            return new OutboxBatchResult($sent, $failed);
         });
     }
 

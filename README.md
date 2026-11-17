@@ -83,6 +83,19 @@ gravados pela porta `Telemetry` (Application) e pelo adapter `NewRelicTelemetry`
 - **`SagaTimeoutCheck`**: a cada `saga:check-timeouts`, com `overdue_count` (sagas aguardando o processor com
   prazo vencido no início) e `compensated_count`.
 
+Transações do agente PHP (helper `App\Infrastructure\Support\NewRelic`, no-op sem a extensão):
+
+- **`saga:consume`**: uma transação de background por mensagem (`SagaConsumer/<tipo>`).
+- **`outbox:relay`**: uma transação de background por ciclo que publicou algo (`OutboxRelay/publish`, atributos
+  `published_count` e `failed_count`, `noticeError` nas falhas); ciclos vazios são descartados
+  (`newrelic_ignore_transaction`). Sem isso, as métricas ficariam presas numa transação que só acaba com o processo.
+- **CronJob `schedule:run`**: cada comando agendado roda como processo filho (`php artisan ...`) e vira a sua
+  própria transação. O processo dura segundos e o daemon local morria com o pod antes de conectar o app, então o
+  CronJob usa o **daemon compartilhado** `newrelic-php-daemon` (Deployment + Service na porta 31339, imagem
+  `newrelic/php-daemon:12.12.0`, a mesma versão do agente, como usuário 65534) com
+  `NEW_RELIC_DAEMON_ADDRESS=newrelic-php-daemon:31339` e `NEW_RELIC_APP_CONNECT_TIMEOUT=15s` (o agente espera a
+  conexão do app antes da 1ª transação). Web, relay e consumer continuam com o daemon local (`@newrelic`).
+
 ## Como rodar
 
 Pré-requisitos: Docker e os repositórios `fiapx-infra` e `fiapx-docs` clonados ao lado deste. O PHP roda no
@@ -154,6 +167,8 @@ análise.
 | `FIAPX_MAX_PARALLEL_PER_USER` | Cota de processamentos simultâneos | `5` |
 | `FIAPX_CONSUMER_WAIT_SECONDS` | Long polling de cada fila no `saga:consume` | `5` |
 | `NEW_RELIC_ENABLED`, `NEW_RELIC_LICENSE_KEY` | Agente New Relic (só na imagem de produção) | desligado |
+| `NEW_RELIC_DAEMON_ADDRESS` | Daemon do agente (`newrelic-php-daemon:31339` no CronJob) | `@newrelic` (local ao pod) |
+| `NEW_RELIC_APP_CONNECT_TIMEOUT` | Espera pela conexão do app no daemon (`15s` no CronJob) | `0` (não espera) |
 
 ## Imagem e Kubernetes
 
@@ -162,7 +177,8 @@ análise.
   `linux/amd64`, porque o agente New Relic para Alpine só existe para x86_64.
 - `k8s/base` + `k8s/overlays/prod` (Kustomize): Deployments `video-api-web` (php-fpm + nginx, HPA de 2 a 6 por
   CPU 70%), `video-api-outbox-relay` (1 a 2) e `video-api-saga-consumer` (KEDA de 1 a 5 pelas duas filas), CronJob
-  `schedule:run`, Job `migrate`, Service, `TargetGroupBinding`, PDB e ServiceAccount.
+  `schedule:run`, Job `migrate`, Service, `TargetGroupBinding`, PDB, ServiceAccount e o daemon compartilhado do
+  New Relic (`newrelic-php-daemon`, usado pelo CronJob).
 
 ## Infraestrutura (`infra/`)
 

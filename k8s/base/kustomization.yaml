@@ -11,6 +11,7 @@ resources:
   - targetgroupbinding.yaml
   - hpa.yaml
   - scaledobject.yaml
+  - newrelic-daemon.yaml
   - cronjob.yaml
   - job-migrate.yaml
   - pdb.yaml
