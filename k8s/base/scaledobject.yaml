@@ -1,11 +1,12 @@
 # saga-consumer escalado pelo KEDA de 1 a 5 réplicas, pela profundidade das duas filas que ele consome.
-# O KEDA usa a identidade do próprio workload (Pod Identity, identityOwner: workload) para ler GetQueueAttributes.
+# O KEDA lê GetQueueAttributes com a identidade do próprio operador (identityOwner: keda), que na AWS Academy é a
+# LabRole dos nós (ADR-019).
 apiVersion: keda.sh/v1alpha1
 kind: TriggerAuthentication
 metadata:
   name: video-api-aws
 spec:
-  podIdentity: { provider: aws, identityOwner: workload }
+  podIdentity: { provider: aws, identityOwner: keda }
 ---
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject

@@ -115,8 +115,8 @@ Como trabalhar aqui (detalhes no `README.md`):
   menos de 8 bytes simula vídeo corrompido.
 - Decisões desta etapa (registradas no `fiapx-docs`): `correlation_id` = `MessageId` da mensagem SQS do evento
   do S3; MIME aceito `video/*` ou `application/octet-stream`; `FIAPX_NOTIFY_ON_COMPLETED` (padrão `true`);
-  imagem de produção `linux/amd64` (agente New Relic); `infra/` cria as rotas `/api/videos*` e a role do Pod
-  Identity.
+  imagem de produção `linux/amd64` (agente New Relic); `infra/` cria as rotas `/api/videos*`. Na AWS Academy
+  (ADR-019) não há Pod Identity: pods e KEDA usam a `LabRole` dos nós.
 - Pendências para a Etapa 8: `deploy.yml` reutilizável (ADR-018), geração de `k8s/overlays/prod/aws.env` a partir
   do SSM e do Secret `fiapx-video-api-db` a partir do Secrets Manager, SonarCloud.
 

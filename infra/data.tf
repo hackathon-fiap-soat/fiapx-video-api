@@ -6,12 +6,6 @@ locals {
 
 data "aws_ssm_parameter" "this" {
   for_each = toset([
-    "eks/cluster_name",
-    "s3/videos_bucket",
-    "sqs/video-uploaded/arn",
-    "sqs/saga-replies/arn",
-    "sqs/processing-commands/arn",
-    "sqs/notification-commands/arn",
     "apigw/api_id",
     "apigw/vpc_link_id",
     "alb/listener_arn",
@@ -21,6 +15,5 @@ data "aws_ssm_parameter" "this" {
 }
 
 locals {
-  p      = { for k, v in data.aws_ssm_parameter.this : k => nonsensitive(v.value) }
-  bucket = local.p["s3/videos_bucket"]
+  p = { for k, v in data.aws_ssm_parameter.this : k => nonsensitive(v.value) }
 }

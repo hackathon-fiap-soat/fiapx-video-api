@@ -11,7 +11,7 @@ Aplicação principal do FIAP X: gestão de vídeos, POST pré-assinado no S3, l
 
 PHP 8.4.27 · Laravel 13 · MySQL 8 (Aurora) · AWS SDK (S3, SQS, SSM) · ramsey/uuid (UUID v7) · firebase/php-jwt
 (RS256) · PHPUnit + Mockery · Behat · Pint · PHPStan (Larastan, nível 6) · Docker · Kustomize (EKS) · KEDA ·
-Terraform (rotas no API Gateway e role do Pod Identity)
+Terraform (rotas no API Gateway)
 
 ## Arquitetura
 
@@ -144,14 +144,15 @@ de verdade e apaga o que criou.
   `linux/amd64`, porque o agente New Relic para Alpine só existe para x86_64.
 - `k8s/base` + `k8s/overlays/prod` (Kustomize): Deployments `video-api-web` (php-fpm + nginx, HPA de 2 a 6 por
   CPU 70%), `video-api-outbox-relay` (1 a 2) e `video-api-saga-consumer` (KEDA de 1 a 5 pelas duas filas), CronJob
-  `schedule:run`, Job `migrate`, Service, `TargetGroupBinding`, PDB e ServiceAccount (Pod Identity). O deploy
+  `schedule:run`, Job `migrate`, Service, `TargetGroupBinding`, PDB e ServiceAccount. O deploy
   gera `aws.env` a partir do SSM e o Secret `fiapx-video-api-db` a partir do Secrets Manager (Etapa 8).
 
 ## Infraestrutura (`infra/`)
 
-- Role dos pods pelo EKS Pod Identity, com o mínimo: S3 em `uploads/*` (POST pré-assinado, HeadObject e
-  DeleteObject) e leitura em `results/*`; SQS para consumir `video-uploaded` e `saga-replies` e publicar em
-  `processing-commands` e `notification-commands`; leitura do SSM em `/fiapx/<env>/*`.
+- **Identidade na AWS:** o ambiente roda na AWS Academy, que não permite criar roles nem usar Pod Identity
+  ([ADR-019](https://github.com/hackathon-fiap-soat/fiapx-docs/blob/main/04-adrs/ADR-019-deploy-na-aws-academy-learner-lab.md)).
+  Os pods e o KEDA usam a `LabRole` dos nós do EKS, pelo IMDS. As permissões mínimas que uma role própria teria
+  (S3 em `uploads/*` e `results/*`, as quatro filas e o SSM em `/fiapx/<env>/*`) estão em `seguranca.md`.
 - Rotas no HTTP API, integradas ao ALB interno pelo VPC Link: `/api/videos*` com o authorizer do `fiapx-auth`
   (`/auth/authorizer_id`) e os headers `x-user-*` vindos do contexto; `/api/health/*` sem authorizer.
 - O CI roda `terraform fmt -check` e `validate`; `plan` e `apply` entram na Etapa 8.
