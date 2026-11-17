@@ -122,6 +122,9 @@ docker compose run --rm app composer bdd             # Behat: os 7 cenários obr
 As suítes `Feature`, `Contract` e `Integration` e o Behat precisam do ambiente local de pé. A `Integration` grava
 de verdade e apaga o que criou.
 
+No CI, depois dos testes: Análise no **SonarCloud** ([organização `hackathon-fiap-soat`](https://sonarcloud.io/organizations/hackathon-fiap-soat/projects)) depois dos testes, com a cobertura e o Quality Gate como check (`sonar-project.properties`, Secret `SONAR_TOKEN`). O `clover.xml` gerado no container tem os caminhos ajustados para o runner antes da
+análise.
+
 ## Variáveis de ambiente
 
 | Variável | Uso | Padrão |
