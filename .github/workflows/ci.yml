@@ -28,7 +28,8 @@ jobs:
       # Repositórios lado a lado, como na máquina de quem desenvolve (o compose monta ../fiapx-docs).
       - name: Baixar o fiapx-video-api
         uses: actions/checkout@v4
-        with: { path: fiapx-video-api }
+        # Histórico completo: o SonarCloud usa o blame para separar código novo do antigo.
+        with: { path: fiapx-video-api, fetch-depth: 0 }
       - name: Baixar o fiapx-docs (contratos)
         uses: actions/checkout@v4
         with: { repository: hackathon-fiap-soat/fiapx-docs, path: fiapx-docs }
@@ -49,6 +50,16 @@ jobs:
         run: docker compose run --rm -q app composer lint
       - name: Rodar o PHPUnit com cobertura ≥ 80% (unit, feature, contrato e integração)
         run: docker compose run --rm -q app composer test:coverage
+      - name: Ajustar os caminhos da cobertura (do container para o runner)
+        # O PHPUnit roda no container, com o código em /var/www/html; o scanner roda no runner.
+        run: sudo sed -i "s#/var/www/html#$GITHUB_WORKSPACE/fiapx-video-api#g" coverage/clover.xml
+      - name: Analisar no SonarCloud e esperar o Quality Gate
+        uses: SonarSource/sonarqube-scan-action@v8.4.1
+        with:
+          projectBaseDir: fiapx-video-api
+          args: -Dsonar.qualitygate.wait=true
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       - name: Rodar o Behat (cenários obrigatórios da SAGA)
         run: docker compose run --rm -q app composer bdd
       - name: Mostrar os logs do ambiente local (só em falha)
