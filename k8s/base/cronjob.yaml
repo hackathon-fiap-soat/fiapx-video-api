@@ -1,4 +1,7 @@
 # schedule:run a cada minuto: saga:check-timeouts, videos:expire-pending e messaging:prune (routes/console.php).
+# O schedule:run dispara cada comando como processo filho (php artisan ...), e cada um vira uma transação
+# "Other" no New Relic. O processo dura segundos: usa o daemon compartilhado (newrelic-daemon.yaml) e espera
+# até 15 s a conexão do app no 1º envio, senão os eventos (SagaTimeoutCheck) se perdem com o pod.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -26,6 +29,9 @@ spec:
                 - configMapRef: { name: fiapx-video-api-aws }
                 - secretRef: { name: fiapx-video-api-db }
                 - secretRef: { name: fiapx-video-api-app, optional: true }
+              env:
+                - { name: NEW_RELIC_DAEMON_ADDRESS, value: "newrelic-php-daemon:31339" }
+                - { name: NEW_RELIC_APP_CONNECT_TIMEOUT, value: "15s" }
               resources:
                 requests: { cpu: 50m, memory: 128Mi }
                 limits: { cpu: 500m, memory: 256Mi }

@@ -112,7 +112,8 @@ spec §8.4 e ADR-003):
   Localmente, um token emitido pelo `npm run dev` do `fiapx-auth` precisa ser aceito aqui.
 - SAGA orquestrada (ADR-008): estado em `processing_sagas`, comandos pela `outbox_messages`, consumidores
   idempotentes (`processed_messages`), `deadline_at` e `PROCESSING_TIMEOUT`, `messaging:prune` diário.
-- Processos: web, `outbox:relay`, `saga:consume` (filas `video-uploaded` e `saga-replies.fifo`), cron e Job
+- Processos: web, `outbox:relay`, `saga:consume` (filas `video-uploaded` e `saga-replies.fifo`), cron (com o daemon
+  compartilhado `newrelic-php-daemon`, porque o processo é curto demais para o daemon local) e Job
   de migrate. Manifests com Kustomize em `k8s/`.
 - O `saga:consume` descarta o `s3:TestEvent` sem erro.
 

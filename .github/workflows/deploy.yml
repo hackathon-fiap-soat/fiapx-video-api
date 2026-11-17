@@ -125,10 +125,10 @@ jobs:
       - name: Aplicar os Deployments e o CronJob com a imagem nova
         run: kubectl apply -f manifests.yaml
 
-      - name: Aguardar o rollout dos Deployments (web, outbox-relay e saga-consumer)
+      - name: Aguardar o rollout dos Deployments (web, outbox-relay, saga-consumer e daemon do New Relic)
         run: |
           set -euo pipefail
-          for d in video-api-web video-api-outbox-relay video-api-saga-consumer; do
+          for d in video-api-web video-api-outbox-relay video-api-saga-consumer newrelic-php-daemon; do
             kubectl -n fiapx rollout status deployment/$d --timeout=5m
           done
 

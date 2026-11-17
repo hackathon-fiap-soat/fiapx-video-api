@@ -1,0 +1,59 @@
+# Daemon do New Relic compartilhado (ADR-011) para processos curtos: o CronJob schedule:run dura segundos e o
+# daemon local (@newrelic, iniciado pelo agente) morria com o pod antes de conectar o app e enviar os dados.
+# Os processos longos (web, outbox-relay, saga-consumer) seguem com o daemon local. Mesma versão do agente.
+# A imagem roda como root por padrão, mas o daemon não precisa: roda como 65534 (nobody), raiz só leitura,
+# log no stdout. O command substitui o entrypoint, que fixaria o endereço em $(hostname):31339.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: newrelic-php-daemon
+  labels: { app.kubernetes.io/name: newrelic-php-daemon, app.kubernetes.io/part-of: fiapx }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: newrelic-php-daemon }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: newrelic-php-daemon, app.kubernetes.io/part-of: fiapx }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: daemon
+          image: newrelic/php-daemon:12.12.0
+          command:
+            - /usr/bin/newrelic-daemon
+            - --logfile=/proc/self/fd/1
+            - --watchdog-foreground
+            - --address=0.0.0.0:31339
+            - --loglevel=info
+          ports:
+            - { name: daemon, containerPort: 31339 }
+          readinessProbe:
+            tcpSocket: { port: daemon }
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: daemon }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 25m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: newrelic-php-daemon
+  labels: { app.kubernetes.io/name: newrelic-php-daemon, app.kubernetes.io/part-of: fiapx }
+spec:
+  selector: { app.kubernetes.io/name: newrelic-php-daemon }
+  ports:
+    - { name: daemon, port: 31339, targetPort: daemon }
